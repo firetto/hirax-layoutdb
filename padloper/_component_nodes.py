@@ -15,6 +15,8 @@ from _edges import RelationVersionAllowedType, RelationVersion,\
                    RelationComponentType, RelationSubcomponent,\
                    RelationProperty, RelationPropertyType,\
                    RelationFlagComponent, RelationConnection
+from _permissions import Permission, check_permission
+from padloper.method_decorators import authenticated
 
 class ComponentType(Vertex):
     """
@@ -32,7 +34,7 @@ class ComponentType(Vertex):
     primary_attr: str = "name"
 
     @classmethod
-    def get_names_of_types_and_versions(cls):
+    def get_names_of_types_and_versions(cls, permissions = None):
         """
         Return a list of dictionaries, of the format
         {'type': <ctypename>, 'versions': [<revname>, ..., <revname>]}
@@ -60,7 +62,6 @@ class ComponentType(Vertex):
 
         return ts
 
-    @classmethod
     def __repr__(self):
         return f"{self.category}: {self.name} ({self._id})"
 
@@ -123,7 +124,7 @@ class Component(Vertex):
             type "{self.type.name}", \
             {version_text}, id {self.id()}'
 
-    def get_property(self, type, at_time: int):
+    def get_property(self, type, at_time: int, permissions = None):
         """
         Given a property type, get a property of this component active at time
         :param time:. 
@@ -137,12 +138,12 @@ class Component(Vertex):
         """
         from _property_nodes import Property
 
-        if not self.in_db(strict_check=False):
+        if not self.in_db(strict_check=False, permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {self.name} has not yet been added to the database."
             )
 
-        if not type.in_db(strict_check=False):
+        if not type.in_db(strict_check=False, permissions=permissions):
             raise PropertyTypeNotAddedError(
                 f"Property type {type.name} of component " +
                  "{self.name} " +
@@ -169,7 +170,8 @@ class Component(Vertex):
 
         return Property.from_id(vs[0].id)
 
-    def get_all_properties(self):
+    @authenticated
+    def get_all_properties(self, permissions = None):
         """Return all properties, along with their edges of this component as
         a tuple of the form (Property, RelationProperty)
 
@@ -177,7 +179,7 @@ class Component(Vertex):
         """
         from _property_nodes import Property
 
-        if not self.in_db(strict_check=False):
+        if not self.in_db(strict_check=False, permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {self.name} has not yet been added to the database."
             )
@@ -205,10 +207,12 @@ class Component(Vertex):
 
         return result
 
+    @authenticated
     def get_all_properties_of_type(
         self, type,
         from_time: int = -1,
-        to_time: int = g._TIMESTAMP_NO_ENDTIME_VALUE
+        to_time: int = g._TIMESTAMP_NO_ENDTIME_VALUE,
+        permissions = None
     ):
         """
         Given a property type, return all edges that connected them between time
@@ -226,7 +230,7 @@ class Component(Vertex):
         :rtype: list[RelationProperty]
         """
 
-        if not self.in_db(strict_check=False):
+        if not self.in_db(strict_check=False, permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {self.name} has not yet been added to the database."
             )
@@ -260,13 +264,14 @@ class Component(Vertex):
             id=e['id']['@value']['relationId']  # weird but you have to
         ) for e in edges]
 
-    def get_all_flags(self):
+    @authenticated
+    def get_all_flags(self, permissions = None):
         """Return all flags connected to this component of the form (Flag)
 
         :rtype: [Flag]
         """
 
-        if not self.in_db(strict_check=False):
+        if not self.in_db(strict_check=False, permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {self.name} has not yet been added to the database."
             )
@@ -285,13 +290,14 @@ class Component(Vertex):
 
         return result
 
-    def get_subcomponents(self):
+    @authenticated
+    def get_subcomponents(self, permissions = None):
         """Return all subcomponents connected to this component.
 
         :rtype: [Component]
         """
 
-        if not self.in_db(strict_check=False):
+        if not self.in_db(strict_check=False, permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {self.name} has not yet been added to the database."
             )
@@ -299,16 +305,17 @@ class Component(Vertex):
         query = g.t.V(self.id()).inE(RelationSubcomponent.category) \
                    .has('active', True).otherV().id_()
 
-        return [Component.from_id(q) for q in query.toList()]
+        return [Component.from_id(q, permissions=permissions) for q in query.toList()]
 
-    def get_supercomponents(self):
+    @authenticated
+    def get_supercomponents(self, permissions = None):
         """Return all supercomponents connected to this component of the form
         (Component)
 
         :rtype: [Component]
         """
 
-        if not self.in_db(strict_check=False):
+        if not self.in_db(strict_check=False, permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {self.name} has not yet been added to the database."
             )
@@ -318,12 +325,14 @@ class Component(Vertex):
         query = g.t.V(self.id()).outE(RelationSubcomponent.category) \
                    .has('active', True).otherV().id_()
 
-        return [Component.from_id(q) for q in query.toList()]
+        return [Component.from_id(q, permissions=permissions) for q in query.toList()]
 
+    @authenticated
     def set_property(
         self, property, start: Timestamp, end: Timestamp = None, 
         force_property: bool = False,
-        strict_add: bool = False
+        strict_add: bool = False,
+        permissions = None,
     ):
         """
         Given a property :param property:, MAKE A _VIRTUAL COPY of it,
@@ -331,9 +340,21 @@ class Component(Vertex):
         :start_time:. Return the Property instance that was added.
 
         """
+        # print('perms: ', permissions)
         from _property_nodes import Property
+        # # TODO: check permissions here
+        # # test
+        # perms = Permission(['set_property', 'edit_component', 'add_component'], "j")
+        # permission_group_pass = ['set_property', 'edit_component']
+        # permission_group_fail = ['set_property', 'edit_component', 'admin']
+        # if not check_permission(perms, permission_group_fail):
+        #     raise NoPermissionsError(
+        #         "User does not have the required permissions to perform this action."
+        #         )
+        # print(kwargs['method_name'])
+        # print(self.__class__.__name__)
 
-        if not self.in_db(strict_check=False):
+        if not self.in_db(strict_check=False, permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {self.name} has not yet been added to the database."
             )
@@ -345,7 +366,8 @@ class Component(Vertex):
             )
 
         current_property = self.get_property(
-            type=property.type, at_time=start.time
+            type=property.type, at_time=start.time,
+            permissions=permissions
         )
 
         if current_property is not None:
@@ -367,13 +389,15 @@ class Component(Vertex):
 #                )
             else:
                 # end that property.
-                self.unset_property(current_property, start)
+                self.unset_property(current_property, start,
+                permissions=permissions)
 
         else:
 
             existing_properties = self.get_all_properties_of_type(
                 type=property.type,
-                from_time=start.time
+                from_time=start.time,
+                permissions=permissions
             )
 
             if len(existing_properties) > 0:
@@ -400,22 +424,14 @@ class Component(Vertex):
                         "set 'force_property' parameter to True to bypass."
                     )
 
-#        prop_copy = Property(
-#            values=property.values,
-#            type=property.type
-#        )
-#
-#        prop_copy._add()
-#
-#        e = RelationProperty(inVertex=prop_copy, outVertex=self, start=start,
-#                             end=end)
         e = RelationProperty(inVertex=property, outVertex=self, start=start,
                              end=end)
         e.add()
 
         return property #_copy
 
-    def unset_property(self, property, end: Timestamp):
+    @authenticated
+    def unset_property(self, property, end: Timestamp, permissions = None):
         """
         Given a property that is connected to this component,
         set the "end" attributes of the edge connecting the component and
@@ -440,12 +456,12 @@ class Component(Vertex):
         :type comments: str, optional
         """
 
-        if not self.in_db(strict_check=False):
+        if not self.in_db(strict_check=False, permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {self.name} has not yet been added to the database."
             )
 
-        if not property.in_db(strict_check=False):
+        if not property.in_db(strict_check=False, permissions=permissions):
             raise PropertyNotAddedError(
                 f"Property of component {self.name} " +
                 f"of values {property.values} being unset " +
@@ -484,8 +500,9 @@ class Component(Vertex):
            .property('end_edit_time', end.edit_time) \
            .property('end_comments', end.comments).iterate()
 
+    @authenticated
     def replace_property(self, propertyTypeName: str, property, at_time: int,
-                         uid: str, start: Timestamp, comments="",):
+                         uid: str, start: Timestamp, comments="", permissions = None):
         """Replaces the Component property vertex in the serverside.
 
         :param propertyTypeName: The name of the property type being replaced.
@@ -526,11 +543,14 @@ class Component(Vertex):
         # Sets a new property
         self.set_property(
             property=property,
-            start=start
+            start=start,
+            permissions=permissions
         )
 
+    @authenticated
     def disable_property(self, propertyTypeName,
-                         disable_time: int = int(time.time())):
+                         disable_time: int = int(time.time()),                         
+                         permissions = None):
         """Disables the property in the serverside
 
         :param propertyTypeName: The name of the property type being replaced.
@@ -550,9 +570,11 @@ class Component(Vertex):
            .property('active', False).property('time_disabled', disable_time)\
            .next()
 
+    @authenticated
     def connect(
         self, comp, start: Timestamp, end: Timestamp = None,
-        strict_add: bool = True, is_replacement: bool = False
+        strict_add: bool = True, is_replacement: bool = False,
+        permissions = None
     ):
         """Given another Component :param comp:,
         connect the two components.
@@ -575,12 +597,12 @@ class Component(Vertex):
         if is_replacement:
             raise RuntimeError(f"Is_replacement feature not implemented yet. {is_replacement}")
 
-        if not self.in_db():
+        if not self.in_db(permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {self.name} has not yet been added to the database."
             )
 
-        if not comp.in_db():
+        if not comp.in_db(permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {comp.name} has not yet " +
                 "been added to the database."
@@ -592,7 +614,8 @@ class Component(Vertex):
             )
 
         curr_conn = self.get_connections(comp=comp,
-                                         at_time=start.time)
+                                         at_time=start.time,
+                                         permissions=permissions)
         # If this doesn't pass, something is very broken!
         assert(len(curr_conn) <= 1)
 
@@ -612,7 +635,8 @@ class Component(Vertex):
             return
 
         all_conn = self.get_connections(comp=comp,
-                                        from_time=start.time)
+                                        from_time=start.time,
+                                        permissions=permissions)
 
         if len(all_conn) > 0:
             if end == None:
@@ -644,9 +668,9 @@ class Component(Vertex):
         curr_conn.add()
 #        print(f'connected: {self} -> {comp}  ({start.uid} {start.time})')
 
-
-    def disconnect(self, comp, end):
-        """Given another Component :param comp:, disconnect the two
+    @authenticated
+    def disconnect(self, comp, end, permissions = None):
+        """Given another Component :param component:, disconnect the two
         components at time :param time:.
 
         :param comp: Another Component to disconnect this component from.
@@ -656,19 +680,20 @@ class Component(Vertex):
         """
 
         # Done for troubleshooting (so you know which component is not added?)
-        if not self.in_db(strict_check=False):
+        if not self.in_db(strict_check=False, permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {self.name} has not yet been added to the database."
             )
 
-        if not comp.in_db(strict_check=False):
+        if not comp.in_db(strict_check=False, permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {comp.name} has not yet " +
                 "been added to the database."
             )
 
         curr_conn = self.get_connections(comp=comp,
-                                         at_time = end.time)
+                                         at_time = end.time,
+                                         permissions=permissions)
         assert(len(curr_conn) <= 1)
 
         if len(curr_conn) == 0:
@@ -681,9 +706,9 @@ class Component(Vertex):
         else:
             curr_conn[0]._end(end)
 
-
-    def disable_connection(self, comp,
-                           disable_time: int = int(time.time())):
+    @authenticated
+    def disable_connection(self, comp, disable_time: int = int(time.time()),
+                           permissions = None):
         """Disables the connection in the serverside
 
         :param comp: Component that this component has connection with.
@@ -693,9 +718,11 @@ class Component(Vertex):
         """
         raise RuntimeError("Deprecated!")
 
+    @authenticated
     def get_connections(self, comp = None, at_time = None,
                         from_time = None, to_time = None,
-                        exclude_subcomps: bool = False):
+                        exclude_subcomponents: bool = False,
+                        permissions = None):
         """
         Get connections to another component, or all other components, at a
         time, at all times or in a time range, depending on the parameters.
@@ -718,7 +745,7 @@ class Component(Vertex):
 
         :rtype: list[RelationConnection]
         """
-        if not self.in_db(strict_check=False):
+        if not self.in_db(strict_check=False, permissions=perimssions):
             raise ComponentNotAddedError(
                 f"Component {self.name} has not yet been added to the database."
             )
@@ -727,7 +754,7 @@ class Component(Vertex):
                 comp = [comp]
             comp_id = [c.id() for c in comp]
             for c in comp:
-                if not c.in_db(strict_check=False):
+                if not c.in_db(strict_check=False, permissions):
                     raise ComponentNotAddedError(
                         f"Component {c.name} has not yet " +
                         "been added to the database."
@@ -800,8 +827,10 @@ class Component(Vertex):
 
         return result
 
+    @authenticated
     def get_all_connections_at_time(
-        self, at_time: int, exclude_subcomponents: bool = False
+        self, at_time: int, exclude_subcomponents: bool = False,
+        permissions = None
     ):
         """
         Given a component, return all connections between this Component and 
@@ -877,9 +906,11 @@ class Component(Vertex):
 
         return result
 
+    @authenticated
     def get_all_connections_with(
         self, component, from_time: int = -1,
-        to_time: int = g._TIMESTAMP_NO_ENDTIME_VALUE
+        to_time: int = g._TIMESTAMP_NO_ENDTIME_VALUE,
+        permissions = None
     ):
         """
         Given two components, return all edges that connected them between time
@@ -928,8 +959,10 @@ class Component(Vertex):
             id=e['id']['@value']['relationId']  # weird but you have to
         ) for e in edges]
 
+    @authenticated
     def get_connection(
-        self, component, at_time: int
+        self, component, at_time: int,
+        permissions = None
     ):
         """Given two components, return the edge that connected them at
         time :param at_time:.
@@ -1012,8 +1045,9 @@ class Component(Vertex):
 
         return result
 
+    @authenticated
     def subcomponent_connect(
-            self, comp, strict_add=False):
+            self, comp, strict_add=False, permissions = None):
         """
         Given another Component :param comp:, make it a subcomponent of the current component.
 
@@ -1021,12 +1055,12 @@ class Component(Vertex):
         :type comp: Component
         """
 
-        if not self.in_db():
+        if not self.in_db(permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {self.name} has not yet been added to the database."
             )
 
-        if not comp.in_db():
+        if not comp.in_db(permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {comp.name} has not yet" +
                 "been added to the database."
@@ -1037,17 +1071,15 @@ class Component(Vertex):
                 f"Trying to make {self.name} subcomponent to itself."
             )
 
-        current_subcomp = self.get_subcomponent(
-            comp=comp
-        )
-
-        comp_to_subcomp = comp.get_subcomponent(
-            comp=self
-        )
+        current_subcomp = self.get_subcomponent(comp=comp,
+                                                permissions=permissions)
+        comp_to_subcomp = component.get_subcomponent(comp=self,
+                                                     permissions=permissions)
 
         if comp_to_subcomp is not None:
-            strictraise(strict_add, ComponentIsSubcomponentOfOtherComponentError,
-                f"Component {comp.name} is already a subcomponent of {self.name}"
+            strictraise(strict_add,
+                        ComponentIsSubcomponentOfOtherComponentError,
+               f"Component {comp.name} is already a subcomponent of {self.name}"
             )
             return
         if current_subcomp is not None:
@@ -1066,8 +1098,8 @@ class Component(Vertex):
             current_subcomp.add()
 #            print(f'subcomponent connected: {self} -> {comp}')
 
-
-    def get_subcomponent(self, comp):
+    @authenticated
+    def get_subcomponent(self, comp, permissions = None):
         """Given the component itself and its subcomponent, return the edge between them.
 
         :param comp: The other component which is the subcomponent of the current component.
@@ -1075,12 +1107,12 @@ class Component(Vertex):
         """
 
         # Done for troubleshooting (so you know which component is not added?)
-        if not self.in_db(strict_check=False):
+        if not self.in_db(strict_check=False, permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {self.name} has not yet been added to the database."
             )
 
-        if not comp.in_db(strict_check=False):
+        if not comp.in_db(strict_check=False, permissions=permissions):
             raise ComponentNotAddedError(
                 f"Component {comp.name} has not yet" +
                 "been added to the database."
@@ -1102,8 +1134,10 @@ class Component(Vertex):
             id=e[0]['id']['@value']['relationId']
         )
 
+    @authenticated
     def disable_subcomponent(self, otherComponent,
-                             disable_time: int = int(time.time())):
+                             disable_time: int = int(time.time()),
+                             permissions = None):
         """Disabling an edge for a subcomponent
 
         :param otherComponent: Another Component that this component has 
@@ -1120,7 +1154,7 @@ class Component(Vertex):
            .property('active', False)\
            .property('time_disabled', disable_time).next()
 
-    def as_dict(self, at_time: int = None, bare = False):
+    def as_dict(self, at_time: int = None, bare = False, permissions = None):
         """Return a dictionary representation of this Component at time
         :param at_time: The time to check the component at. Pass `None` to get
           properties/flags/connexions at all times.
@@ -1141,22 +1175,25 @@ class Component(Vertex):
 
         if not bare:
             prop_dicts = [{**prop.as_dict(), **rel.as_dict()} \
-                for (prop, rel) in self.get_all_properties()
+                for (prop, rel) in self.get_all_properties(permissions=permissions)
             ]
 
             conn_dicts = [{**{"name": conn.other_vertex(self).name},
                            **conn.as_dict()} \
-                for conn in self.get_connections(exclude_subcomps=True)
+                for conn in self.get_connections(exclude_subcomps=True,
+                                                 permissions=permissions)
             ]
 
-            flag_dicts = [flag.as_dict() for flag in self.get_all_flags()]
+            flag_dicts = [flag.as_dict() for \
+                          flag in self.get_all_flags(permissions=permissions)]
 
             subcomp_dicts = [{"name": subcomps.name} \
-                for subcomps in self.get_subcomponents()
+                for subcomps in self.get_subcomponents(permissions=permissions)
             ]
         
             supercomp_dicts = [{"name": supercomps.name} \
-                for supercomps in self.get_supercomponents()
+                for supercomps in \
+                    self.get_supercomponents(permissions=permissions)
             ]
             extra = {
                 'properties': prop_dicts,

@@ -40,6 +40,7 @@ mgmt.makePropertyKey('allowed_regex').dataType(String.class).make()
 mgmt.makePropertyKey('n_values').dataType(Long.class).make()
 mgmt.makePropertyKey('values').dataType(String.class).cardinality(Cardinality.LIST).make()
 mgmt.makePropertyKey('notes').dataType(String.class).make()
+mgmt.makePropertyKey('institution').dataType(String.class).make()
 
 # Edges
 connection = mgmt.makeEdgeLabel("rel_connection").make()
@@ -82,4 +83,5 @@ mgmt.commit()
 
 mgmt = graph.openManagement()
 #vals = mgmt.makePropertyKey('values').dataType(String.class).cardinality(org.janusgraph.core.Cardinality.LIST).make()
+
 mgmt.commit()

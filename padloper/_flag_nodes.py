@@ -23,6 +23,8 @@ from _edges import RelationFlagType, RelationFlagComponent, RelationFlagSeverity
 
 from typing import Optional, List
 
+from padloper.method_decorators import authenticated
+
 class FlagType(Vertex):
     """The representation of a flag type. 
 
@@ -105,7 +107,8 @@ class Flag(Vertex):
     def end_flag(self, dummy):
         raise RuntimeError("Method deprecated. Use set_end().")
 
-    def set_end(self, end : Timestamp):
+    @authenticated
+    def set_end(self, end : Timestamp, permissions=None):
         """
         Given a flag, set the "end" attributes of the flag to indicate that this
         flag has been ended.
@@ -114,7 +117,7 @@ class Flag(Vertex):
         :type end: Timestamp
         """
 
-        if not self.in_db(strict_check=False):
+        if not self.in_db(strict_check=False, permissions=permissions):
             raise FlagNotAddedError(
                 f"Flag {self.name} has not yet been added to the database."
             )
